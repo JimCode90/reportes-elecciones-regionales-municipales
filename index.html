@@ -96,6 +96,20 @@
     <div class="hint" id="loginMsg"></div>
   </section>
 
+  <!-- Oficial de control -->
+  <section id="offsec" class="card hidden">
+    <div class="field">
+      <label class="lbl" for="ofSel">Oficial de control</label>
+      <select id="ofSel" class="sel-in"></select>
+    </div>
+    <div class="field hidden" id="ofKeyWrap">
+      <label class="lbl" for="ofKey">Clave del oficial</label>
+      <input id="ofKey" type="password" autocomplete="off">
+    </div>
+    <button class="btn" style="width:100%" id="btnOf">Continuar</button>
+    <div class="hint" id="ofMsg"></div>
+  </section>
+
   <section id="app" class="hidden">
     <div class="card">
       <label class="lbl">Etapa del reporte</label>
@@ -145,13 +159,13 @@
 <script>
 /* ===================== CONFIGURACIÓN =====================
    Pega aquí la URL de tu Apps Script (la que termina en /exec) */
-var API_URL = 'https://script.google.com/macros/s/AKfycbxQvIAMQMveKYDihDlsLsowBvT_6_NSiBANDgWVmQvn7PCkqq5MkwYtOQf6zymBorxN/exec';
+var API_URL = 'https://script.google.com/macros/s/AKfycbxKd-zI5Rwmr1Eg6sWdaedIUG5QbmuBQCyFXqGXze9tnNK2dW8y9-198NTo5C4H3-mnhg/exec';
 /* ========================================================= */
 </script>
 <script>
 (function(){
   var $ = function(id){ return document.getElementById(id); };
-  var S = { clave:'', reporter:'', sheets:[], sheet:null, fields:[], schools:[], school:null, values:{}, initial:{} };
+  var S = { clave:'', oficial:'', claveOf:'', oficiales:[], pickOf:false, reporter:'', sheets:[], sheet:null, fields:[], schools:[], school:null, values:{}, initial:{} };
 
   // ---------- almacenamiento local (comodidad) ----------
   function store(k, v){ try{ if(v===undefined) return localStorage.getItem('rep_'+k); localStorage.setItem('rep_'+k, v); }catch(e){ return null; } }
@@ -194,8 +208,8 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxQvIAMQMveKYDihDlsLsowBv
       })();
     });
   }
-  function clean(m){ return String(m).replace(/^(Exception|Error):\s*/i,'').replace(/^(SIN_ACCESO|ZONA|CLAVE):\s*/,''); }
-  function ctx(){ return { zona:S.zona, clave:S.clave }; }
+  function clean(m){ return String(m).replace(/^(Exception|Error):\s*/i,'').replace(/^(SIN_ACCESO|ZONA|CLAVE|CLAVE_OF|OFICIAL):\s*/,''); }
+  function ctx(){ return { zona:S.zona, clave:S.clave, oficial:S.oficial, claveOf:S.claveOf }; }
   function errText(e){ return e === 'NET' ? 'Sin conexión o servidor ocupado. Revisa tu señal e inténtalo de nuevo.' : e; }
 
   // ---------- borradores (nada se pierde si falla la señal) ----------
@@ -296,7 +310,7 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxQvIAMQMveKYDihDlsLsowBv
     });
   }
   function showLogin(){
-    $('app').classList.add('hidden'); $('bar').classList.add('hidden'); $('btnOut').classList.add('hidden');
+    $('app').classList.add('hidden'); $('offsec').classList.add('hidden'); $('bar').classList.add('hidden'); $('btnOut').classList.add('hidden');
     $('subtitle').textContent = S.locked ? 'Zona ' + S.zona : 'Identifícate para continuar';
     $('reporter').value = S.reporter; $('clave').value = S.clave; $('loginMsg').textContent = '';
     updateKey(); $('login').classList.remove('hidden');
@@ -306,7 +320,7 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxQvIAMQMveKYDihDlsLsowBv
     $('keyWrap').classList.toggle('hidden', !(z && z.needsKey));
   }
   $('zona').onchange = function(){ $('clave').value = store('clave|' + $('zona').value) || ''; updateKey(); };
-  $('btnOut').onclick = function(){ if(dirtyCount()) saveDraft(); showLogin(); };
+  $('btnOut').onclick = function(){ if(dirtyCount()) saveDraft(); S.pickOf = true; showLogin(); };
 
   $('btnLogin').onclick = function(){
     var name = $('reporter').value.trim();
@@ -323,9 +337,51 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxQvIAMQMveKYDihDlsLsowBv
     }).catch(function(e){ $('btnLogin').disabled=false; $('loginMsg').textContent = 'Error: ' + errText(e); });
   };
 
+  // ---------- oficial de control ----------
+  // Si la zona define oficiales, cada agente solo ve los locales de su oficial.
   function start(r){
-    S.sheets = r.sheets; S.sheet = null;
+    S.oficiales = r.oficiales || [];
+    if(!S.oficiales.length){ S.oficial = ''; S.claveOf = ''; return begin(r); }
+    var saved = store('oficial|' + S.zona);
+    var o = !S.pickOf && S.oficiales.filter(function(x){ return n(x.oficial) === n(saved); })[0];
+    if(!o) return showOficial(r);
+    S.oficial = o.oficial; S.claveOf = store('claveof|' + S.zona + '|' + o.oficial) || '';
+    call('apiOficial', ctx()).then(function(v){ v.ok ? begin(r) : showOficial(r); })
+      .catch(function(e){ showOficial(r, errText(e)); });
+  }
+  function showOficial(r, msg){
+    S.initR = r;
+    $('app').classList.add('hidden'); $('bar').classList.add('hidden'); $('login').classList.add('hidden');
     $('subtitle').textContent = S.reporter + (S.zona ? ' · Zona ' + S.zona : '');
+    $('btnOut').classList.remove('hidden');
+    $('ofSel').innerHTML = '<option value="">— Elige tu oficial —</option>' + S.oficiales.map(function(x){
+      return '<option'+(n(x.oficial)===n(S.oficial)?' selected':'')+'>'+esc(x.oficial)+'</option>'; }).join('');
+    $('ofKey').value = ''; $('ofMsg').textContent = msg || '';
+    updateOfKey(); $('offsec').classList.remove('hidden');
+  }
+  function updateOfKey(){
+    var o = S.oficiales.filter(function(x){ return x.oficial === $('ofSel').value; })[0];
+    $('ofKeyWrap').classList.toggle('hidden', !(o && o.needsKey));
+    if(o && o.needsKey && !$('ofKey').value) $('ofKey').value = store('claveof|' + S.zona + '|' + o.oficial) || '';
+  }
+  $('ofSel').onchange = updateOfKey;
+  $('btnOf').onclick = function(){
+    var name = $('ofSel').value;
+    if(!name){ $('ofMsg').textContent = 'Elige tu oficial de control.'; return; }
+    S.oficial = name; S.claveOf = $('ofKey').value.trim();
+    $('btnOf').disabled = true; $('ofMsg').textContent = 'Verificando…';
+    call('apiOficial', ctx()).then(function(v){
+      $('btnOf').disabled = false;
+      if(!v.ok){ $('ofMsg').textContent = 'Clave incorrecta.'; $('ofKeyWrap').classList.remove('hidden'); return; }
+      store('oficial|' + S.zona, S.oficial); store('claveof|' + S.zona + '|' + S.oficial, S.claveOf);
+      S.pickOf = false; $('offsec').classList.add('hidden'); begin(S.initR);
+    }).catch(function(e){ $('btnOf').disabled = false; $('ofMsg').textContent = 'Error: ' + errText(e); });
+  };
+
+  function begin(r){
+    S.pickOf = false;
+    S.sheets = r.sheets; S.sheet = null;
+    $('subtitle').textContent = S.reporter + (S.zona ? ' · Zona ' + S.zona : '') + (S.oficial ? ' · ' + S.oficial : '');
     $('btnOut').classList.remove('hidden');
     $('app').classList.remove('hidden');
     var st = $('stages'); st.innerHTML = '';
