@@ -242,7 +242,34 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
     return (h<10?'0':'')+h+':'+m[2];
   }
   // Campos de hora que también admiten la palabra NEGATIVO (apertura, cierre y llegada a ODPE)
-  function negOK(f){ return /APERTURA DEL LOCAL|CIERRE DEL LOCAL|LLEGADA A ODPE/.test(n(f.label)); }
+  function negOK(f){ return /APERTURA DEL LOCAL|CIERRE DEL LOCAL|LLEGADA A ODPE|HORA SALIDA DEL LOCAL/.test(n(f.label)); }
+  // Repliegue: "HORA SALIDA DEL LOCAL DE VOTACION" manda. Si es NEGATIVO, los demás campos
+  // se ocultan y se guardan como NEGATIVO. (Solo aplica si la pestaña tiene ese campo.)
+  function lastOf(f){ var p = (f.path && f.path.length) ? f.path : [f.label]; return n(p[p.length - 1]); }
+  function isMaster(f){ return /HORA SALIDA DEL LOCAL/.test(lastOf(f)); }
+  function isDep(f){
+    if(!S.fields.some(isMaster)) return false;
+    return /ENCARGADO DEL REPLIE|^(PLACA|TIPO|CONDUCTOR|CODUCTOR|A DONDE SE DIRIGE LUEGO|PNP|FF\.?\s?AA\.?)$/.test(lastOf(f));
+  }
+  function masterField(){ return S.fields.filter(isMaster)[0]; }
+  function masterNeg(){
+    var m = masterField(), el = m && $('f'+m.col);
+    return !!(el && el.closest('.field').dataset.neg === '1');
+  }
+  function applyDep(){
+    var neg = masterNeg();
+    S.fields.forEach(function(f){
+      if(!isDep(f)) return;
+      var fd = document.querySelector('.field[data-col="'+f.col+'"]');
+      if(fd) fd.classList.toggle('hidden', neg);
+    });
+  }
+  function refreshChanged(){
+    S.fields.forEach(function(f){
+      var fd = document.querySelector('.field[data-col="'+f.col+'"]');
+      if(fd) fd.classList.toggle('changed', readField(f) !== S.initial[f.col]);
+    });
+  }
   // Campos de UNA persona (nombre + documento + teléfono) del reporte de repliegue.
   // Devuelve null si el campo no es de este tipo.
   function pk(f){
@@ -483,7 +510,7 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
   function buildForm(){
     // DEBUG (consola de Chrome: F12 → Console). Muestra cómo se interpretó cada campo.
     console.log('[REPORTE] index.html con campos de persona v2 · pestaña:', S.sheet);
-    try{ console.table(S.fields.map(function(f){ var k = pk(f); return { col:f.col, ruta:(f.path||[f.label]).join(' > '), tipoServidor:f.type, persona3cajas: k ? (k.id + ' / ' + k.ph) : '-', horaNegativo: (f.type==='time' && negOK(f)) ? 'si' : '-' }; })); }catch(e){ console.log('[REPORTE] error en log', e); }
+    try{ console.table(S.fields.map(function(f){ var k = pk(f); return { col:f.col, ruta:(f.path||[f.label]).join(' > '), tipoServidor:f.type, persona3cajas: k ? (k.id + ' / ' + k.ph) : '-', horaNegativo: (f.type==='time' && negOK(f)) ? 'si' : '-', repliegue: isMaster(f) ? 'MAESTRO' : (isDep(f) ? 'depende' : '-') }; })); }catch(e){ console.log('[REPORTE] error en log', e); }
     var groups = [], byG = {};
     S.fields.forEach(function(f){
       var g = f.group || f.label;
@@ -492,10 +519,13 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
     });
     var html = groups.map(function(g){
       var fs = byG[g];
+      var mi = -1; fs.forEach(function(f, i){ if(mi < 0 && isMaster(f)) mi = i; });
+      if(mi > 0) fs = [fs[mi]].concat(fs.slice(0, mi), fs.slice(mi + 1));
       var single = fs.length === 1 && !fs[0].group;
       return '<div class="card group">' + (single ? '' : '<h2>'+esc(g)+'</h2>') + fs.map(fieldHtml).join('') + '</div>';
     }).join('');
     $('form').innerHTML = html;
+    applyDep();
   }
 
   function fieldHtml(f){
@@ -546,6 +576,7 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
     var el = $('f'+f.col);
     var cur = S.values[f.col] || {};
     if(!el || cur.formula || f.type==='percent') return null;
+    if(isDep(f) && masterNeg()) return 'NEGATIVO';
     if(f.type==='personas'){
       var list = Array.prototype.map.call(el.querySelectorAll('.pp'), function(d){
         return { inst:d.querySelector('.pp-i').value, nom:d.querySelector('.pp-n').value, dni:d.querySelector('.pp-d').value, tel:d.querySelector('.pp-t').value };
@@ -595,6 +626,19 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
       box.dataset.neg = on ? '1' : '0';
       $(pr[0] + '_h').classList.toggle('hidden', on);
       Array.prototype.forEach.call(box.querySelectorAll('.seg button'), function(b){ b.classList.toggle('on', b === ng); });
+      var mf = masterField();
+      if(mf && $('f'+mf.col) === $(pr[0])){
+        // si el local se guardó como NEGATIVO, al volver a "Hora" los campos reaparecen vacíos
+        if(!on && n(((S.values[mf.col] || {}).v || '')).trim() === 'NEGATIVO'){
+          S.fields.forEach(function(f){
+            if(!isDep(f)) return;
+            var fd = document.querySelector('.field[data-col="'+f.col+'"]');
+            if(fd) Array.prototype.forEach.call(fd.querySelectorAll('input,textarea'), function(i){ i.value = ''; });
+          });
+        }
+        applyDep(); refreshChanged();
+      }
+      console.log('[REPORTE] ' + (mf && $('f'+mf.col) === $(pr[0]) ? 'salida del local' : 'campo') + ' →', on ? 'NEGATIVO' : 'Hora');
       box.dispatchEvent(new Event('input', {bubbles:true})); return;
     }
     var a = e.target.closest('[data-add]');
@@ -620,7 +664,15 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
   $('btnSave').onclick = function(){
     var ch = changes(); if(!ch.length) return;
     $('mdName').textContent = 'N° ' + (S.school.n||'-') + ' · ' + S.school.local;
-    $('mdList').innerHTML = ch.map(function(c){ return '<div class="chg"><b>'+esc(c.label)+'</b>'+esc(c.val || '(vacío)')+'</div>'; }).join('');
+    var warn = '';
+    if(masterField() && masterNeg()){
+      var ya = S.fields.filter(function(f){
+        var v = ((S.values[f.col] || {}).v || '').trim();
+        return isDep(f) && v && n(v).trim() !== 'NEGATIVO';
+      }).map(function(f){ return f.label; });
+      if(ya.length) warn = '<div class="chg" style="background:#fef3c7;border-radius:8px;padding:10px;color:#92400e"><b style="color:#92400e">⚠ ESTE LOCAL YA TIENE DATOS REGISTRADOS</b>Se reemplazarán por NEGATIVO: '+esc(ya.join(', '))+'</div>';
+    }
+    $('mdList').innerHTML = warn + ch.map(function(c){ return '<div class="chg"><b>'+esc(c.label)+'</b>'+esc(c.val || '(vacío)')+'</div>'; }).join('');
     $('modal').style.display = 'flex';
   };
   $('mdCancel').onclick = function(){ $('modal').style.display = 'none'; };
