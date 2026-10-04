@@ -264,6 +264,16 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
       if(fd) fd.classList.toggle('hidden', neg);
     });
   }
+  // Tarjetas del reporte de cierre (solo en pestañas con el campo de salida del repliegue)
+  var CARD_CIERRE = 'CIERRE DEL LOCAL', CARD_REPL = 'REPLIEGUE DEL MATERIAL ELECTORAL', CARD_ODPE = 'LLEGADA A ODPE';
+  function cardOf(f){
+    if(!S.fields.some(isMaster)) return null;
+    var l = lastOf(f);
+    if(isMaster(f) || isDep(f)) return CARD_REPL;
+    if(/CIERRE DEL LOCAL|INCIDENCIA/.test(l)) return CARD_CIERRE;
+    if(/LLEGADA A ODPE/.test(l)) return CARD_ODPE;
+    return null;
+  }
   function refreshChanged(){
     S.fields.forEach(function(f){
       var fd = document.querySelector('.field[data-col="'+f.col+'"]');
@@ -510,18 +520,28 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
   function buildForm(){
     // DEBUG (consola de Chrome: F12 → Console). Muestra cómo se interpretó cada campo.
     console.log('[REPORTE] index.html con campos de persona v2 · pestaña:', S.sheet);
-    try{ console.table(S.fields.map(function(f){ var k = pk(f); return { col:f.col, ruta:(f.path||[f.label]).join(' > '), tipoServidor:f.type, persona3cajas: k ? (k.id + ' / ' + k.ph) : '-', horaNegativo: (f.type==='time' && negOK(f)) ? 'si' : '-', repliegue: isMaster(f) ? 'MAESTRO' : (isDep(f) ? 'depende' : '-') }; })); }catch(e){ console.log('[REPORTE] error en log', e); }
+    try{ console.table(S.fields.map(function(f){ var k = pk(f); return { col:f.col, ruta:(f.path||[f.label]).join(' > '), tipoServidor:f.type, persona3cajas: k ? (k.id + ' / ' + k.ph) : '-', horaNegativo: (f.type==='time' && negOK(f)) ? 'si' : '-', repliegue: isMaster(f) ? 'MAESTRO' : (isDep(f) ? 'depende' : '-'), tarjeta: cardOf(f) || (f.group || f.label) }; })); }catch(e){ console.log('[REPORTE] error en log', e); }
     var groups = [], byG = {};
     S.fields.forEach(function(f){
-      var g = f.group || f.label;
+      var g = cardOf(f) || f.group || f.label;
       if(!byG[g]){ byG[g] = []; groups.push(g); }
       byG[g].push(f);
     });
+    // Orden de las tres tarjetas: Cierre → Repliegue → Llegada a ODPE (ocupan los lugares donde ya estaban)
+    var rank = {}; rank[CARD_CIERRE] = 1; rank[CARD_REPL] = 2; rank[CARD_ODPE] = 3;
+    var slots = [], named = [];
+    groups.forEach(function(g, i){ if(rank[g] && S.fields.some(isMaster)){ slots.push(i); named.push(g); } });
+    named.sort(function(a, b){ return rank[a] - rank[b]; });
+    slots.forEach(function(i, k){ groups[i] = named[k]; });
     var html = groups.map(function(g){
       var fs = byG[g];
+      var titled = !!rank[g] && S.fields.some(isMaster);
       var mi = -1; fs.forEach(function(f, i){ if(mi < 0 && isMaster(f)) mi = i; });
       if(mi > 0) fs = [fs[mi]].concat(fs.slice(0, mi), fs.slice(mi + 1));
-      var single = fs.length === 1 && !fs[0].group;
+      if(titled && g === CARD_CIERRE){            // la hora de cierre primero, luego incidencias
+        fs = fs.filter(function(f){ return /CIERRE DEL LOCAL/.test(lastOf(f)); }).concat(fs.filter(function(f){ return !/CIERRE DEL LOCAL/.test(lastOf(f)); }));
+      }
+      var single = !titled && fs.length === 1 && !fs[0].group;
       return '<div class="card group">' + (single ? '' : '<h2>'+esc(g)+'</h2>') + fs.map(fieldHtml).join('') + '</div>';
     }).join('');
     $('form').innerHTML = html;
