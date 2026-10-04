@@ -248,10 +248,10 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
   function pk(f){
     var l = n(f.label), g = n(f.group || '');
     if(/ENCARGADO DEL REPLIE/.test(l)) return { ph:'Nombres y apellidos', id:'DNI' };
-    if(!/DOMINGO.?CIERRE/.test(n(S.sheet)) || f.type === 'personas') return null;
+    if(f.type === 'personas') return null;
     if(/^(CONDUCTOR|CODUCTOR)$/.test(l) && /UNIDAD MOVIL/.test(g)) return { ph:'Nombres y apellidos', id:'DNI' };
-    if(/FF\.OO/.test(g) && /^FF\.?\s?AA\.?$/.test(l)) return { ph:'Grado, nombres y apellidos', id:'DNI' };
-    if(/FF\.OO/.test(g) && l === 'PNP') return { ph:'Grado, nombres y apellidos', id:'CIP' };
+    if(/FF\.?\s?(OO|00)/.test(g) && /^FF\.?\s?AA\.?$/.test(l)) return { ph:'Grado, nombres y apellidos', id:'DNI' };
+    if(/FF\.?\s?(OO|00)/.test(g) && l === 'PNP') return { ph:'Grado, nombres y apellidos', id:'CIP' };
     return null;
   }
   function toNum(s){ var x = String(s||'').replace(/[^\d.,-]/g,'').replace(',', '.'); return x===''?'':String(Number(x)); }
