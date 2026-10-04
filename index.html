@@ -246,12 +246,13 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
   // Campos de UNA persona (nombre + documento + teléfono) del reporte de repliegue.
   // Devuelve null si el campo no es de este tipo.
   function pk(f){
-    var l = n(f.label), g = n(f.group || '');
+    var path = (f.path && f.path.length) ? f.path : [f.label];
+    var l = n(path[path.length - 1]), full = n(path.join(' '));
     if(/ENCARGADO DEL REPLIE/.test(l)) return { ph:'Nombres y apellidos', id:'DNI' };
     if(f.type === 'personas') return null;
-    if(/^(CONDUCTOR|CODUCTOR)$/.test(l) && /UNIDAD MOVIL/.test(g)) return { ph:'Nombres y apellidos', id:'DNI' };
-    if(/FF\.?\s?(OO|00)/.test(g) && /^FF\.?\s?AA\.?$/.test(l)) return { ph:'Grado, nombres y apellidos', id:'DNI' };
-    if(/FF\.?\s?(OO|00)/.test(g) && l === 'PNP') return { ph:'Grado, nombres y apellidos', id:'CIP' };
+    if(/^(CONDUCTOR|CODUCTOR)$/.test(l) && /UNIDAD MOVIL/.test(full)) return { ph:'Nombres y apellidos', id:'DNI' };
+    if(/FF\.?\s?(OO|00)/.test(full) && /^FF\.?\s?AA\.?$/.test(l)) return { ph:'Grado, nombres y apellidos', id:'DNI' };
+    if(/FF\.?\s?(OO|00)/.test(full) && l === 'PNP') return { ph:'Grado, nombres y apellidos', id:'CIP' };
     return null;
   }
   function toNum(s){ var x = String(s||'').replace(/[^\d.,-]/g,'').replace(',', '.'); return x===''?'':String(Number(x)); }
@@ -480,6 +481,9 @@ var API_URL = 'https://script.google.com/macros/s/AKfycbxR91TgP1zCSXNGXdJQSfvh69
     $('bar').classList.remove('hidden'); updateBar();
   }
   function buildForm(){
+    // DEBUG (consola de Chrome: F12 → Console). Muestra cómo se interpretó cada campo.
+    console.log('[REPORTE] index.html con campos de persona v2 · pestaña:', S.sheet);
+    try{ console.table(S.fields.map(function(f){ var k = pk(f); return { col:f.col, ruta:(f.path||[f.label]).join(' > '), tipoServidor:f.type, persona3cajas: k ? (k.id + ' / ' + k.ph) : '-', horaNegativo: (f.type==='time' && negOK(f)) ? 'si' : '-' }; })); }catch(e){ console.log('[REPORTE] error en log', e); }
     var groups = [], byG = {};
     S.fields.forEach(function(f){
       var g = f.group || f.label;
